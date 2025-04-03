@@ -454,7 +454,170 @@ ggplot(site_comparison, aes(x = True_Psi, y = Estimated_Psi)) +
 
 Not bad. Looks like there's a bit of overestimation at the lower end of the range of occupancy probability, and a bit of underestimation at the upper end. In a formal project, we might interrogate this further and try some tweaks to address it, but for this high-level demo, we'll move on.
 
+Let's run a posterior predictive check, a common tool for Bayesian model diagnostics, in which we see whether the observed data are realistic for the data generating process we've inferred. We'll implement this in DHARMa, which uses a flexible quantile residual approach suitable for many types of models.
+
+```{r dharma_posterior_predictive, fig.width=10, fig.height=8}
+# Load the DHARMa package for diagnostic plots
+library(DHARMa)
+
+# Set up the structure of y
+if(length(dim(y)) == 3) {
+  n_species <- dim(y)[1]
+  n_sites <- dim(y)[2]
+  n_visits <- dim(y)[3]
+} else if(length(dim(y)) == 2) {
+  n_species <- 1
+  n_sites <- dim(y)[1]
+  n_visits <- dim(y)[2]
+} else {
+  stop("Unexpected dimension of data matrix y") # in case data set has unanticipated structure in future use
+}
+
+# print dimensions; may help in debugging
+cat("Data dimensions:", n_species, "species,", n_sites, "sites,", n_visits, "visits\n")
+
+# thin posterior samples for computational efficiency
+n_sims <- dim(m1_jags$sims.list$z)[1]
+sim_indices <- sample(1:n_sims, min(100, n_sims))  # thin to 100
+
+# get matrix of observed data, and flatten to fit what DHARMa expects
+if(length(dim(y)) == 3) {
+  # Multi-species data
+  y_obs <- matrix(NA, nrow = n_species * n_sites, ncol = n_visits)
+  for (i in 1:n_species) {
+    for (j in 1:n_sites) {
+      y_obs[(i-1)*n_sites + j, ] <- y[i, j, ]
+    }
+  }
+} else {
+  y_obs <- y
+}
+
+# array for simulated data
+y_sim <- array(NA, dim = c(nrow(y_obs), ncol(y_obs), length(sim_indices)))
+
+# get posterior draws of z and p from jagsUI object
+z_samples <- m1_jags$sims.list$z
+p_samples <- m1_jags$sims.list$p
+
+# check dimensions and structure of posterior samples
+cat("z_samples dimensions:", paste(dim(z_samples), collapse = " x "), "\n")
+cat("p_samples dimensions:", paste(dim(p_samples), collapse = " x "), "\n")
+
+# posterior predictive simulation
+for (s in 1:length(sim_indices)) {
+  idx <- sim_indices[s]
+  
+  if(length(dim(y)) == 3) {
+    # to accommodate multi-species in future use
+    for (i in 1:n_species) {
+      for (j in 1:n_sites) {
+        # get occupancy state for this species at this site
+        z_ij <- z_samples[idx, i, j]
+        # get detection probability for this species
+        p_i <- p_samples[idx, i]
+        
+        # simulate detections for each site visit
+        for (k in 1:n_visits) {
+          if(z_ij == 1) {
+            y_sim[(i-1)*n_sites + j, k, s] <- rbinom(1, 1, p_i)
+          } else {
+            y_sim[(i-1)*n_sites + j, k, s] <- 0
+          }
+        }
+      }
+    }
+  } else {
+    # single species model
+    for (j in 1:n_sites) {
+      # get occupancy state for this site
+      z_j <- z_samples[idx, j]
+      # get detection probability (may vary by site or be constant depending on
+      # model structure)
+      if(length(dim(p_samples)) == 2) {
+        p_j <- p_samples[idx, j]
+      } else {
+        p_j <- p_samples[idx]
+      }
+      
+      # simulate detections for each visit
+      for (k in 1:n_visits) {
+        if(z_j == 1) {
+          y_sim[j, k, s] <- rbinom(1, 1, p_j)
+        } else {
+          y_sim[j, k, s] <- 0
+        }
+      }
+    }
+  }
+}
+
+# convert to format DHARMa expects
+flat_y_obs <- as.vector(y_obs)
+flat_y_sim <- matrix(NA, nrow = length(flat_y_obs), ncol = length(sim_indices))
+
+for (s in 1:length(sim_indices)) {
+  flat_y_sim[, s] <- as.vector(y_sim[, , s])
+}
+
+# create DHARMa object
+dharma_obj <- createDHARMa(
+  simulatedResponse = flat_y_sim,
+  observedResponse = flat_y_obs,
+  integerResponse = TRUE,
+  method = "PIT"
+)
+
+# Create DHARMa diagnostic plots
+plot(dharma_obj)
+
+# test for overdispersion and zero-inflation
+# these are not really issues for binary data, but I'll take the opportunity to
+# show how smoothly DHARMa does this.
+testDispersion(dharma_obj)
+testZeroInflation(dharma_obj)
+
+# Create a DHARMa residual plot against predicted detection probability
+if(length(dim(y)) == 3) {
+  # for multi-species model
+  p_pred <- array(dim = c(n_species * n_sites, n_visits))
+  p_mean <- m1_jags$mean$p
+  z_mean <- m1_jags$mean$z
+  
+  for (i in 1:n_species) {
+    for (j in 1:n_sites) {
+      # predicted detection = p * z
+      p_pred[(i-1)*n_sites + j, ] <- p_mean[i] * z_mean[i, j]
+    }
+  }
+} else {
+  # for single species model
+  p_pred <- matrix(nrow = n_sites, ncol = n_visits)
+  if(length(dim(m1_jags$mean$p)) == 0) {
+    # for constant detection probability
+    p_mean <- m1_jags$mean$p
+    for (j in 1:n_sites) {
+      p_pred[j, ] <- p_mean * m1_jags$mean$z[j]
+    }
+  } else {
+    # for site-specific detection probability
+    p_mean <- m1_jags$mean$p
+    for (j in 1:n_sites) {
+      p_pred[j, ] <- p_mean[j] * m1_jags$mean$z[j]
+    }
+  }
+}
+
+# flatten p_pred to match the residuals
+flat_p_pred <- as.vector(p_pred)
+plotResiduals(dharma_obj, flat_p_pred, xlab = "Predicted Detection Probability", 
+              main = "DHARMa Residuals vs. Predicted Detection")
+```
+
+Looks like a bit of a trend in residuals versus predictions. Again, for a formal project, we'd keep tweaking, but for now let's move on.
+
 Next we'll look at a visual summary of the known true parameter values and our model's estimates, as we did for the simpler model:
+
 
 ```{r full_model_visual_comparison, fig.width=10, fig.height=6}
 # Set up dataframe for full model parameter comparisons
