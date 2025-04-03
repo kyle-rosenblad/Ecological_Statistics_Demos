@@ -1,0 +1,33 @@
+
+model {
+  # Priors for occupancy parameters
+  beta0 ~ dnorm(0, 0.1)  # Intercept
+  beta1 ~ dnorm(0, 0.1)  # Topography effect
+  
+  # Priors for detection parameters
+  alpha0 ~ dnorm(0, 0.1)  # Intercept
+  alpha1 ~ dnorm(0, 0.1)  # Weather effect
+  
+  # Occupancy process
+  for (i in 1:n_sites) {
+    logit(psi[i]) <- beta0 + beta1 * habitat[i]  # Occupancy probability
+    z[i] ~ dbern(psi[i])                         # True, unobserved occupancy state at each site
+  }
+  
+  # Detection process
+  for (i in 1:n_sites) {
+    for (j in 1:n_surveys) {
+      logit(p[i,j]) <- alpha0 + alpha1 * weather[i,j]  # Detection probability
+      y[i,j] ~ dbern(z[i] * p[i,j])                    # Detection given occupancy
+    }
+  }
+  
+  # Some useful derived quantities
+  occ_fs <- sum(z) / n_sites  # Occupancy proportion in our finite sample
+  
+  # Mean occupancy across sites
+  mean_psi <- mean(psi)
+  
+  # Mean detection across surveys
+  mean_p <- mean(p)
+}

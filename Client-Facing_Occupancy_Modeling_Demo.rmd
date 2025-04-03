@@ -1,0 +1,359 @@
+---
+title: "Advanced Statistical Techniques for Analyzing Ecological Monitoring Data"
+author: "Kyle Rosenblad"
+date: "2 April 2025"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    highlight: tango
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+# Load packages silently
+library(unmarked)
+library(ggplot2)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(gridExtra)
+library(viridis)
+set.seed(123)
+```
+
+# Executive Summary
+
+This report demonstrates how advanced statistical techniques can help us better understand where species live across the landscape, even when our surveys sometimes miss them. Using an approach called "occupancy modeling," we can:
+
+- **Account for imperfect detection** - Just because we don't see a species doesn't mean it's not there
+- **Identify important habitat factors** that determine where species occur
+- **Create accurate distribution maps** to inform conservation decisions
+- **Save time and money** by optimizing future survey efforts
+
+The methods shown here have been successfully applied to numerous wildlife monitoring programs, endangered species assessments, and habitat management plans.
+
+# The Challenge: Understanding Species Distribution
+
+Wildlife managers and conservation planners face a common challenge: **How do we know where a species truly lives?**
+
+Traditional surveys face several limitations:
+- Species may go undetected even when present
+- Survey conditions affect our ability to find species
+- Limited resources mean we can't survey everywhere
+
+```{r simulate_data, include=FALSE}
+# Number of sites and surveys
+n_sites <- 100
+n_surveys <- 4
+
+# Create a site-level covariate for occupancy (e.g., habitat quality)
+habitat_quality <- rnorm(n_sites)
+
+# Create a survey-level covariate for detection (e.g., weather conditions)
+weather <- matrix(rnorm(n_sites * n_surveys), n_sites, n_surveys)
+
+# True occupancy parameters
+beta0 <- -0.5  # Intercept
+beta1 <- 1.2   # Effect of habitat quality
+
+# Calculate occupancy probability for each site
+psi <- plogis(beta0 + beta1 * habitat_quality)
+
+# True detection parameters
+alpha0 <- 0.2   # Intercept
+alpha1 <- -0.8  # Effect of poor weather
+
+# Initialize the observation data
+y <- matrix(NA, n_sites, n_surveys)
+
+# Generate true occupancy state (z)
+z <- rbinom(n_sites, 1, psi)
+
+# Generate detection/non-detection data
+for (i in 1:n_sites) {
+  for (j in 1:n_surveys) {
+    # Site is occupied (z=1)
+    if (z[i] == 1) {
+      # Calculate detection probability
+      p <- plogis(alpha0 + alpha1 * weather[i, j])
+      # Generate detection/non-detection
+      y[i, j] <- rbinom(1, 1, p)
+    } else {
+      # Site is unoccupied (z=0), so species cannot be detected
+      y[i, j] <- 0
+    }
+  }
+}
+
+# Create site data and detection data for visualization
+site_data <- data.frame(
+  Site = 1:n_sites,
+  Habitat_Quality = habitat_quality
+)
+
+# Reshape detection data for visualization
+detection_data <- data.frame(y)
+names(detection_data) <- paste0("Survey_", 1:n_surveys)
+detection_data$Site <- 1:n_sites
+detection_long <- reshape2::melt(detection_data, id.vars = "Site", 
+                                variable.name = "Survey", value.name = "Detected")
+detection_long$Detected <- factor(detection_long$Detected, levels = c(0, 1), 
+                                labels = c("Not Detected", "Detected"))
+
+# Calculate naive occupancy
+site_data$Detected_Ever <- apply(y, 1, function(x) any(x == 1))
+
+# Format data for unmarked
+site_covs <- data.frame(habitat_quality = habitat_quality)
+obs_covs <- data.frame(
+  weather = as.vector(t(weather))
+)
+umf <- unmarkedFrameOccu(y = y, siteCovs = site_covs, obsCovs = obs_covs)
+
+# Fit models
+m0 <- occu(~1 ~1, data = umf)  # Constant model
+m1 <- occu(~1 ~habitat_quality, data = umf)  # Habitat-only model
+m2 <- occu(~weather ~habitat_quality, data = umf)  # Full model
+
+# Model selection
+models <- fitList(
+  "ψ(.)p(.)" = m0,
+  "ψ(habitat)p(.)" = m1,
+  "ψ(habitat)p(weather)" = m2
+)
+ms <- modSel(models)
+
+# Predict occupancy across habitat gradient
+habitat_seq <- seq(min(habitat_quality), max(habitat_quality), length.out = 100)
+newdata <- data.frame(habitat_quality = habitat_seq)
+pred_psi <- predict(m2, type = "state", newdata = newdata)
+
+# Predict detection across weather gradient
+weather_seq <- seq(min(weather), max(weather), length.out = 100)
+newdata_det <- data.frame(weather = weather_seq)
+pred_p <- predict(m2, type = "det", newdata = newdata_det)
+
+# Landscape prediction
+grid_size <- 20
+landscape <- expand.grid(x = 1:grid_size, y = 1:grid_size)
+landscape$habitat_quality <- with(landscape, 
+                                sin(x/3) * cos(y/3) + rnorm(grid_size^2, 0, 0.3))
+landscape_pred <- predict(m2, type = "state", 
+                         newdata = data.frame(habitat_quality = landscape$habitat_quality))
+landscape$occupancy <- landscape_pred$Predicted
+```
+
+## The Problem of Imperfect Detection
+
+When we only look at raw survey data, we can **underestimate** where species truly occur:
+
+```{r naive_vs_true, fig.height=5, fig.width=10}
+# Compare naive and true occupancy
+comparison <- data.frame(
+  Metric = c("Observed in Surveys (Naive)", "Actual Occurrence"),
+  Percentage = c(mean(site_data$Detected_Ever) * 100, mean(z) * 100)
+)
+
+ggplot(comparison, aes(x = Metric, y = Percentage, fill = Metric)) +
+  geom_col() +
+  scale_fill_viridis_d(option = "D", begin = 0.3, end = 0.7) +
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), 
+            position = position_dodge(width = 0.9), vjust = -0.5) +
+  labs(title = "How Much We Miss: The Detection Gap",
+       subtitle = "Comparing what we observe in surveys vs. actual species occurrence",
+       y = "Percentage of Sites Occupied") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+The chart above shows the gap between what we observe during surveys and the actual species occurrence. This happens because:
+
+1. The species may be present but not active during our visit
+2. Weather conditions may affect visibility or animal behavior
+3. Vegetation density might hide the species
+4. We might simply miss seeing or hearing the species
+
+# Our Approach: Accounting for Imperfect Detection
+
+## How It Works
+
+We use repeated surveys at the same locations to help us understand how often we miss species when they're actually present.
+
+```{r detection_pattern, fig.height=4, fig.width=10}
+# Create a small example dataset for a visual
+set.seed(42)
+example_sites <- 8
+example_surveys <- 4
+example_data <- matrix(0, nrow = example_sites, ncol = example_surveys)
+
+# Known occupied sites with varying detection patterns
+example_data[1, c(1, 3)] <- 1  # Detected in survey 1 and 3
+example_data[2, 2] <- 1        # Detected only in survey 2
+example_data[3, c(2, 3, 4)] <- 1  # Detected in 3 surveys
+example_data[4, c(1, 4)] <- 1  # Detected in surveys 1 and 4
+example_data[5, ] <- 0         # Never detected (may or may not be occupied)
+example_data[6, ] <- 0         # Never detected (may or may not be occupied)
+example_data[7, 4] <- 1        # Detected only in survey 4
+example_data[8, c(1, 2, 3, 4)] <- 1  # Detected in all surveys
+
+# Convert to long format for plotting
+example_df <- data.frame(example_data)
+names(example_df) <- paste0("Survey_", 1:example_surveys)
+example_df$Site <- paste0("Site ", 1:example_sites)
+example_long <- reshape2::melt(example_df, id.vars = "Site", 
+                              variable.name = "Survey", value.name = "Detected")
+example_long$Detected <- factor(example_long$Detected, 
+                               levels = c(0, 1), 
+                               labels = c("Not Detected", "Detected"))
+
+# Plot the detection pattern
+ggplot(example_long, aes(x = Survey, y = Site, fill = Detected)) +
+  geom_tile(color = "white", size = 0.5) +
+  scale_fill_manual(values = c("Not Detected" = "#E5E5E5", "Detected" = "#4CAF50")) +
+  labs(title = "Species Detection Across Multiple Surveys",
+       subtitle = "Different patterns help us understand detection probability") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 11))
+```
+
+By looking at these patterns, our statistical model can:
+
+- Estimate the probability of detecting the species when it's present
+- Adjust our occupancy estimates to account for sites where the species was present but never detected
+- Consider the effects of habitat and survey conditions
+
+## The Benefits of Our Approach
+
+Our modeling approach provides several key advantages:
+
+```{r benefits_table}
+benefits <- data.frame(
+  Benefit = c("More Accurate Distribution Maps", 
+             "Identifies Key Habitat Features", 
+             "Quantifies Survey Effectiveness",
+             "Optimizes Future Survey Efforts"),
+  Description = c("Accounts for locations where species was present but not detected",
+                 "Reveals which environmental factors determine where species occur",
+                 "Shows how survey conditions affect our ability to find species",
+                 "Helps design better surveys to maximize detection while minimizing costs")
+)
+
+kable(benefits) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
+  column_spec(1, bold = TRUE)
+```
+
+# Results: What Drives Species Distribution?
+
+## Habitat Relationships
+
+Our analysis reveals how habitat quality affects where this species occurs:
+
+```{r habitat_relationship, fig.width=7, fig.height=5}
+ggplot(data.frame(habitat_quality = habitat_seq, 
+                 psi = pred_psi$Predicted, 
+                 lower = pred_psi$lower, 
+                 upper = pred_psi$upper), 
+       aes(x = habitat_quality, y = psi)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.3, fill = "#5B9BD5") +
+  geom_line(size = 1.2, color = "#2E75B6") +
+  labs(x = "Habitat Quality Index", y = "Probability of Occurrence", 
+       title = "How Habitat Quality Affects Species Occurrence",
+       subtitle = "Shaded area shows confidence range") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank())
+```
+
+This chart shows that:
+
+- As habitat quality increases, the likelihood of finding the species increases substantially
+- In poor-quality habitat, there's less than a 25% chance of species occurrence
+- In high-quality habitat, there's more than a 75% chance of species occurrence
+- The blue shaded area shows our confidence in these estimates
+
+## Survey Effectiveness
+
+Understanding how survey conditions affect our ability to detect the species:
+
+```{r detection_relationship, fig.width=7, fig.height=5}
+ggplot(data.frame(weather = weather_seq, 
+                 p = pred_p$Predicted, 
+                 lower = pred_p$lower, 
+                 upper = pred_p$upper), 
+       aes(x = weather, y = p)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.3, fill = "#ED7D31") +
+  geom_line(size = 1.2, color = "#C55A11") +
+  labs(x = "Weather Condition Index (lower = better)", y = "Probability of Detection", 
+       title = "How Weather Affects Our Ability to Detect the Species",
+       subtitle = "Species may be present but not detected under poor weather conditions") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank())
+```
+
+Key insights:
+
+- Weather strongly affects our ability to detect the species
+- Under optimal conditions, we detect the species about 60% of the time when present
+- Under poor conditions, detection probability drops below 30%
+- This explains why repeated surveys are so important
+
+# Predicted Distribution Map
+
+Based on our model, we can predict where the species is likely to occur across the entire landscape:
+
+```{r landscape_prediction, fig.width=9, fig.height=6}
+ggplot(landscape, aes(x = x, y = y, fill = occupancy)) +
+  geom_tile() +
+  scale_fill_viridis_c(name = "Probability of\nOccurrence", option = "viridis", 
+                      labels = scales::percent_format(accuracy = 1)) +
+  labs(title = "Predicted Species Distribution",
+       subtitle = "Based on habitat relationships and accounting for imperfect detection") +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+This map shows the estimated probability of the species occurring across the landscape, with:
+
+- Dark blue areas representing high probability of occurrence (>75%)
+- Light blue/green areas representing moderate probability (25-75%)
+- Yellow areas representing low probability (<25%)
+
+## Management Implications
+
+This distribution map allows managers to:
+
+1. **Prioritize conservation efforts** in areas with high occupancy probability
+2. **Target future surveys** in areas with moderate probability to improve our knowledge
+3. **Identify critical habitat features** that should be protected or enhanced
+4. **Monitor changes over time** by repeating the analysis with new survey data
+
+# Conclusions and Recommendations
+
+Our analysis provides several key insights:
+
+1. **True distribution is more extensive** than raw survey data suggests
+2. **Habitat quality is the primary driver** of where this species occurs
+3. **Weather conditions significantly affect** our ability to detect the species
+4. **Repeated surveys are essential** for accurate distribution assessment
+
+## Next Steps
+
+Based on these findings, we recommend:
+
+1. **Prioritize protection** of high-quality habitat areas shown in dark blue
+2. **Schedule surveys during optimal weather conditions** to maximize detection
+3. **Conduct at least 3-4 repeat visits** at each site for reliable results
+4. **Expand survey efforts** to areas with moderate occupancy probability to refine our understanding
+
+---
+
+*Note: This example uses simulated data for demonstration purposes. For your specific project, we would adapt these methods to your target species and available habitat data.*
+```

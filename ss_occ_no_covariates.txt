@@ -1,0 +1,21 @@
+
+model {
+  # Priors
+  psi ~ dunif(0, 1)       # Occupancy probability
+  p ~ dunif(0, 1)         # Detection probability
+  
+  # Occupancy process
+  for (i in 1:n_sites) {
+    z[i] ~ dbern(psi)     # True, unobserved occupancy state at each site
+  }
+  
+  # Detection process
+  for (i in 1:n_sites) {
+    for (j in 1:n_surveys) {
+      y[i,j] ~ dbern(z[i] * p)  # Observed detection data from each site and survey
+    }
+  }
+  
+  # A useful derived quantity
+  occ_fs <- sum(z) / n_sites  # Occupancy proportion in our finite sample
+}
