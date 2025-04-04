@@ -1,0 +1,47 @@
+
+model {
+  # Priors
+  p ~ dunif(0, 1)                 # Capture probability
+  N ~ dunif(n_observed, 1000)     # Population size
+  
+  # Derived: Probability of never being captured
+  p_never <- pow(1 - p, n_occasions)
+  
+  # Derived: Inclusion probability 
+  psi <- 1 - p_never
+  
+  # Likelihood for capture histories
+  for (i in 1:n_patterns) {
+    # Initialize probability for this capture history pattern
+    log_prob[i] <- 0
+    
+    # Multiply probability for each occasion
+    for (t in 1:n_occasions) {
+      # If captured, multiply by p
+      # If not captured, multiply by (1-p)
+      log_prob[i] <- log_prob[i] + 
+                    y[i, t] * log(p) +
+                    (1 - y[i, t]) * log(1 - p)
+    }
+    
+    # Expected frequency for this pattern
+    exp_freq[i] <- exp(log_prob[i]) * psi * N
+    
+    # Observation model (Poisson approximation to multinomial)
+    counts[i] ~ dpois(exp_freq[i])
+  }
+  
+  # Calculate expected captures for each occasion for posterior predictive checks
+  for (t in 1:n_occasions) {
+    # Expected number captured at occasion t
+    exp_captures[t] <- N * p
+    
+    # For checking - what was actually observed at occasion t?
+    for (i in 1:n_patterns) {
+      obs_occ[i, t] <- y[i, t] * counts[i]
+    }
+    
+    # Total observed at occasion t
+    total_obs[t] <- sum(obs_occ[1:n_patterns, t])
+  }
+}
