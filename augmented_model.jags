@@ -1,10 +1,10 @@
 
 model {
   # Priors
-  omega ~ dunif(0, 1)        # Inclusion probability
+  omega ~ dunif(0, 1)        # Inclusion probability (see augmentation above)
   p ~ dunif(0, 1)            # Capture probability
   
-  # Latent state (z=1 if individual is in population, 0 otherwise)
+  # Latent inclusion state (z=1 if individual is in population, 0 otherwise)
   for (i in 1:M) {
     z[i] ~ dbern(omega)      # Inclusion indicator
     

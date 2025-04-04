@@ -273,7 +273,7 @@ lines(1:n_occasions, n_sim_mean, type = "o", pch = 15, lty = 2, col = "blue")
 polygon(c(1:n_occasions, rev(1:n_occasions)),
         c(n_sim_lower, rev(n_sim_upper)),
         border = NA, col = rgb(0, 0, 1, 0.2))
-legend("topright", legend = c("Observed", "Simulated (mean)", "95% PI"),
+legend("bottomright", legend = c("Observed", "Simulated (mean)", "95% PI"),
        pch = c(16, 15, NA), lty = c(1, 2, NA), col = c("black", "blue", NA),
        fill = c(NA, NA, rgb(0, 0, 1, 0.2)))
 
