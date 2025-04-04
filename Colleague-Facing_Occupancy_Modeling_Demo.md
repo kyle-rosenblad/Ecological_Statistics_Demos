@@ -1,33 +1,36 @@
----
-title: "Bayesian Single-Season Occupancy Modeling Demo with JAGS and jagsUI"
-author: "Kyle Rosenblad"
-date: "2 April 2025"
-output:
-  pdf_document:
-    toc: true
-  html_document:
-    toc: true
-    toc_float: true
-    theme: cosmo
-    highlight: tango
-    code_folding: show
----
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
-```
+Bayesian Single-Season Occupancy Modeling Demo with JAGS and jagsUI
+================
+Kyle Rosenblad
+2 April 2025
 
 # Introduction to Occupancy Modeling
 
-This is a 'colleague-facing' demo showing how I would approach collaboration with other quantitative ecologists or statisticians.
+This is a ‘colleague-facing’ demo showing how I would approach
+collaboration with other quantitative ecologists or statisticians.
 
-Occupancy models are hierarchical models that separate the ecological process--i.e., whether a species occupies a site--from the observation process--i.e., whether a species that is present at a site is actually detected during a survey. The key insight is that when a site is surveyed multiple times, the resulting data can contain patterns that help us disentangle these probabilities. For example, if a site is surveyed four times, and our species of interest  is detected in every survey except the third, we might suspect it was really present all four times, but the third survey just missed it. Furthermore, if the third survey coincided with, for example, a bad weather day, we might even get some idea of what factors influence detection probabilities. 
+Occupancy models are hierarchical models that separate the ecological
+process–i.e., whether a species occupies a site–from the observation
+process–i.e., whether a species that is present at a site is actually
+detected during a survey. The key insight is that when a site is
+surveyed multiple times, the resulting data can contain patterns that
+help us disentangle these probabilities. For example, if a site is
+surveyed four times, and our species of interest is detected in every
+survey except the third, we might suspect it was really present all four
+times, but the third survey just missed it. Furthermore, if the third
+survey coincided with, for example, a bad weather day, we might even get
+some idea of what factors influence detection probabilities.
 
-This document demonstrates Bayesian occupancy modeling concepts and implementation in R using JAGS software and the jagsUI R interface. We will build a "single-season occupancy model", in which we assume that our species' occupancy state (present or absent) does not change over the course of our repeat surveys. This kind of model provides the foundation for more complex approaches like dynamic or multi-season occupancy models, which we will explore in subsequent demos.
+This document demonstrates Bayesian occupancy modeling concepts and
+implementation in R using JAGS software and the jagsUI R interface. We
+will build a “single-season occupancy model”, in which we assume that
+our species’ occupancy state (present or absent) does not change over
+the course of our repeat surveys. This kind of model provides the
+foundation for more complex approaches like dynamic or multi-season
+occupancy models, which we will explore in subsequent demos.
 
 ## Required Packages
 
-```{r packages}
+``` r
 library(jagsUI)      # Interface to JAGS
 library(ggplot2)     # For visualization
 library(dplyr)       # For data wrangling
@@ -39,18 +42,19 @@ set.seed(3289)        # For reproducibility
 
 # Data Simulation
 
-We'll simulate a dataset with:
+We’ll simulate a dataset with:
 
 - 100 sites
 
 - 5 repeat visits per site
 
-- Probability of occupancy influenced by a habitat variable, topographic complexity
+- Probability of occupancy influenced by a habitat variable, topographic
+  complexity
 
-- Probability of detection influenced by weather conditions during each survey
+- Probability of detection influenced by weather conditions during each
+  survey
 
-
-```{r simulate_data}
+``` r
 # Number of sites and surveys
 n_sites <- 100
 n_surveys <- 5
@@ -113,21 +117,36 @@ comparison <- data.frame(
 )
 kable(comparison, digits = 3, caption = "Comparison of Naive and True Occupancy")
 ```
-Depending on the study goals, this would likely be a concerning difference between the true proportion of occupied sites and the naive estimate.
 
-Now let's fit some occupancy models to account for this discrepancy.
+| Metric          | Estimate |
+|:----------------|---------:|
+| Naive Occupancy |     0.49 |
+| True Occupancy  |     0.57 |
+
+Comparison of Naive and True Occupancy
+
+Depending on the study goals, this would likely be a concerning
+difference between the true proportion of occupied sites and the naive
+estimate.
+
+Now let’s fit some occupancy models to account for this discrepancy.
 
 # Fitting Bayesian Occupancy Models with JAGS
 
-It's a good idea to start with the simplest possible model structure and then add features incrementally. This strategy helps us avoid confusing ourselves or overlooking problems.
+It’s a good idea to start with the simplest possible model structure and
+then add features incrementally. This strategy helps us avoid confusing
+ourselves or overlooking problems.
 
 ## 1. Basic Occupancy Model (Constant Occupancy and Detection)
 
-First, we'll assume that occupancy and detection probabilities do not vary among sites or surveys. This is probably not realistic, but it's a good foundation from which to build more sophisticated models.
+First, we’ll assume that occupancy and detection probabilities do not
+vary among sites or surveys. This is probably not realistic, but it’s a
+good foundation from which to build more sophisticated models.
 
-Here we define the JAGS model. This involves writing a separate model file that will be read later (ss_occ_no_covariates.txt).
+Here we define the JAGS model. This involves writing a separate model
+file that will be read later (ss_occ_no_covariates.txt).
 
-```{r basic_model_jags_code}
+``` r
 # Write JAGS model to a file
 cat("
 model {
@@ -153,9 +172,9 @@ model {
 ", file = "ss_occ_no_covariates.txt")
 ```
 
-Now let's fit the model:
+Now let’s fit the model:
 
-```{r fit_basic_model, results='hide'}
+``` r
 # JAGS wants input data in list form:
 jags_data <- list(
   y = y,
@@ -200,19 +219,158 @@ m0_jags <- jags(data = jags_data,
                parallel=TRUE)
 ```
 
-Let's examine the results. Note that the "estimated" occupancy state for some sites (z) is 1, with no uncertainty and thus no diagnostic output like R-hat. This is to be expected because our model assumes that only way a detection could've happened is if the species was really present.
+Let’s examine the results. Note that the “estimated” occupancy state for
+some sites (z) is 1, with no uncertainty and thus no diagnostic output
+like R-hat. This is to be expected because our model assumes that only
+way a detection could’ve happened is if the species was really present.
 
-For other parameters, we want to see large effective sample sizes--at least 100 generally, or a few hundred is even better--and low R-hat values close to 1. That's what we'll see below:
+For other parameters, we want to see large effective sample sizes–at
+least 100 generally, or a few hundred is even better–and low R-hat
+values close to 1. That’s what we’ll see below:
 
-```{r basic_model_results}
+``` r
 print(m0_jags)
+```
 
+    ## JAGS output for model 'ss_occ_no_covariates.txt', generated by jagsUI.
+    ## Estimates based on 3 chains of 5000 iterations,
+    ## adaptation = 100 iterations (sufficient),
+    ## burn-in = 1000 iterations and thin rate = 4,
+    ## yielding 3000 total samples from the joint posterior. 
+    ## MCMC ran in parallel for 0.035 minutes at time 2025-04-03 23:40:19.144976.
+    ## 
+    ##             mean     sd    2.5%     50%   97.5% overlap0 f  Rhat n.eff
+    ## psi        0.605  0.072   0.473   0.602   0.756    FALSE 1 1.003  1100
+    ## p          0.287  0.035   0.220   0.287   0.357    FALSE 1 1.002  1130
+    ## z[1]       0.232  0.422   0.000   0.000   1.000     TRUE 1 1.001  2726
+    ## z[2]       0.229  0.420   0.000   0.000   1.000     TRUE 1 1.001  1538
+    ## z[3]       0.236  0.424   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[4]       0.224  0.417   0.000   0.000   1.000     TRUE 1 1.001  2054
+    ## z[5]       0.232  0.422   0.000   0.000   1.000     TRUE 1 1.000  2954
+    ## z[6]       0.246  0.431   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[7]       0.232  0.422   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[8]       1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[9]       0.215  0.411   0.000   0.000   1.000     TRUE 1 1.005   582
+    ## z[10]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[11]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[12]      0.230  0.421   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[13]      0.238  0.426   0.000   0.000   1.000     TRUE 1 1.001  1864
+    ## z[14]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[15]      0.233  0.423   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[16]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[17]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[18]      0.239  0.427   0.000   0.000   1.000     TRUE 1 1.000  2870
+    ## z[19]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[20]      0.236  0.425   0.000   0.000   1.000     TRUE 1 1.001  1729
+    ## z[21]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[22]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[23]      0.240  0.427   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[24]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[25]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[26]      0.245  0.430   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[27]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[28]      0.232  0.422   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[29]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[30]      0.220  0.415   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[31]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[32]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[33]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[34]      0.231  0.422   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[35]      0.235  0.424   0.000   0.000   1.000     TRUE 1 1.004   669
+    ## z[36]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[37]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[38]      0.234  0.424   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[39]      0.225  0.418   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[40]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[41]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[42]      0.231  0.421   0.000   0.000   1.000     TRUE 1 1.003   711
+    ## z[43]      0.239  0.427   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[44]      0.219  0.414   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[45]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[46]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[47]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[48]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[49]      0.235  0.424   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[50]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[51]      0.228  0.420   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[52]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[53]      0.231  0.422   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[54]      0.210  0.407   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[55]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[56]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[57]      0.242  0.429   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[58]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[59]      0.229  0.420   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[60]      0.214  0.410   0.000   0.000   1.000     TRUE 1 1.004   667
+    ## z[61]      0.222  0.416   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[62]      0.228  0.419   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[63]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[64]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[65]      0.230  0.421   0.000   0.000   1.000     TRUE 1 1.001  1954
+    ## z[66]      0.233  0.423   0.000   0.000   1.000     TRUE 1 1.001  1856
+    ## z[67]      0.239  0.426   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[68]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[69]      0.227  0.419   0.000   0.000   1.000     TRUE 1 1.001  2575
+    ## z[70]      0.249  0.432   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[71]      0.229  0.420   0.000   0.000   1.000     TRUE 1 1.000  2985
+    ## z[72]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[73]      0.226  0.418   0.000   0.000   1.000     TRUE 1 1.002  1106
+    ## z[74]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[75]      0.225  0.418   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[76]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[77]      0.230  0.421   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[78]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[79]      0.215  0.411   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[80]      0.238  0.426   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[81]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[82]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[83]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[84]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[85]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[86]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[87]      0.231  0.421   0.000   0.000   1.000     TRUE 1 1.002  1262
+    ## z[88]      0.236  0.425   0.000   0.000   1.000     TRUE 1 1.003   800
+    ## z[89]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[90]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[91]      0.237  0.425   0.000   0.000   1.000     TRUE 1 1.000  3000
+    ## z[92]      0.227  0.419   0.000   0.000   1.000     TRUE 1 1.001  1497
+    ## z[93]      0.240  0.427   0.000   0.000   1.000     TRUE 1 1.001  2238
+    ## z[94]      0.247  0.432   0.000   0.000   1.000     TRUE 1 1.000  2905
+    ## z[95]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[96]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[97]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[98]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[99]      1.000  0.000   1.000   1.000   1.000    FALSE 1    NA     1
+    ## z[100]     0.222  0.416   0.000   0.000   1.000     TRUE 1 1.001  2605
+    ## occ_fs     0.608  0.053   0.530   0.600   0.730    FALSE 1 1.006   718
+    ## deviance 362.264 17.273 334.074 360.201 401.242    FALSE 1 1.004   828
+    ## 
+    ## **WARNING** Some Rhat values could not be calculated.
+    ## Successful convergence based on Rhat values (all < 1.1). 
+    ## Rhat is the potential scale reduction factor (at convergence, Rhat=1). 
+    ## For each parameter, n.eff is a crude measure of effective sample size. 
+    ## 
+    ## overlap0 checks if 0 falls in the parameter's 95% credible interval.
+    ## f is the proportion of the posterior with the same sign as the mean;
+    ## i.e., our confidence that the parameter is positive or negative.
+    ## 
+    ## DIC info: (pD = var(deviance)/2) 
+    ## pD = 148.9 and DIC = 511.178 
+    ## DIC is an estimate of expected predictive error (lower is better).
+
+``` r
 # Check convergence
 rbind(
   psi_Rhat = m0_jags$Rhat$psi,
   p_Rhat = m0_jags$Rhat$p
 )
+```
 
+    ##              [,1]
+    ## psi_Rhat 1.002545
+    ## p_Rhat   1.002128
+
+``` r
 # Save some outputs for a visual comparison of true and estimated parameter values
 true_values <- c(
   mean(psi),  # Average occupancy probability
@@ -220,12 +378,12 @@ true_values <- c(
   mean(z)  # True proportion of sites occupied
 )
 estimated_values <- c(m0_jags$mean$psi, m0_jags$mean$p, m0_jags$mean$occ_fs)
-
 ```
 
-Now let's visually compare the known true parameter values with our model's estimates:
+Now let’s visually compare the known true parameter values with our
+model’s estimates:
 
-```{r visual_parameter_comparison, fig.width=8, fig.height=5}
+``` r
 # Create data frame for parameter comparisons
 param_comparison <- data.frame(
   Parameter = c("Occupancy Probability (ψ)", "Detection Probability (p)", "Occupancy Proportion"),
@@ -248,13 +406,15 @@ ggplot(param_comparison, aes(x = Parameter, y = Estimated)) +
   coord_flip()
 ```
 
-Pretty good! Now we'll try the more sophisticated model.
+![](Colleague-Facing_Occupancy_Modeling_Demo_files/figure-gfm/visual_parameter_comparison-1.png)<!-- -->
+
+Pretty good! Now we’ll try the more sophisticated model.
 
 ## 2. Model with Covariates for Occupancy and Detection
 
-Let's define the more complex model with covariates:
+Let’s define the more complex model with covariates:
 
-```{r full_model_jags_code}
+``` r
 # Write JAGS model to a file
 cat("
 model {
@@ -292,9 +452,11 @@ model {
 ", file = "ss_occ_with_covariates.txt")
 ```
 
-Now let's fit the full model. Note that you don't have to run the MCMC chains in parallel if you prefer to see real-time progress updates; see comments below.
+Now let’s fit the full model. Note that you don’t have to run the MCMC
+chains in parallel if you prefer to see real-time progress updates; see
+comments below.
 
-```{r fit_full_model, results='hide'}
+``` r
 # Set up data as a list like last model:
 jags_data <- list(
   y = y,
@@ -330,9 +492,13 @@ m1_jags <- jags(data = jags_data,
                parallel=TRUE)
 ```
 
-Let's do some quick checks on the performance of the full model with covariates. This time I won't 'print' the full output since we have several hundred parameters now, but we could do it using the same syntax as we used for the simpler model. If you do try this on your own, you'll see it all looks pretty good.
+Let’s do some quick checks on the performance of the full model with
+covariates. This time I won’t ‘print’ the full output since we have
+several hundred parameters now, but we could do it using the same syntax
+as we used for the simpler model. If you do try this on your own, you’ll
+see it all looks pretty good.
 
-```{r full_model_results}
+``` r
 # Check convergence for key parameters
 rbind(
   beta0_Rhat = m1_jags$Rhat$beta0,
@@ -340,7 +506,15 @@ rbind(
   alpha0_Rhat = m1_jags$Rhat$alpha0,
   alpha1_Rhat = m1_jags$Rhat$alpha1
 )
+```
 
+    ##                 [,1]
+    ## beta0_Rhat  1.002116
+    ## beta1_Rhat  1.000298
+    ## alpha0_Rhat 1.001758
+    ## alpha1_Rhat 1.000188
+
+``` r
 # Compare coefficients with true values
 true_coefs <- c(beta0, beta1, alpha0, alpha1)
 estimated_coefs <- c(m1_jags$mean$beta0, m1_jags$mean$beta1, 
@@ -360,11 +534,20 @@ coef_comparison <- data.frame(
 kable(coef_comparison, digits = 3, caption = "Comparison of True and Estimated Coefficients")
 ```
 
+| Parameter                | true_value | Estimated | LowerCI | UpperCI |
+|:-------------------------|-----------:|----------:|--------:|--------:|
+| Occupancy Intercept (β₀) |       -0.2 |     0.493 |  -0.219 |   1.519 |
+| Habitat Effect (β₁)      |        1.1 |     1.525 |   0.638 |   2.707 |
+| Detection Intercept (α₀) |       -1.0 |    -1.082 |  -1.422 |  -0.752 |
+| Weather Effect (α₁)      |       -0.8 |    -0.707 |  -0.988 |  -0.426 |
+
+Comparison of True and Estimated Coefficients
+
 # Visualization
 
-Let's run some more sophisticated visualizations of key model results:
+Let’s run some more sophisticated visualizations of key model results:
 
-```{r visualization}
+``` r
 # Extract posterior samples
 mcmc_samples <- as.matrix(m1_jags$samples)
 
@@ -398,7 +581,11 @@ ggplot(habitat_plot_data, aes(x = habitat, y = psi_mean)) +
   geom_line() +
   labs(x = "Topographic Complexity", y = "Occupancy Probability") +
   theme_bw()
+```
 
+![](Colleague-Facing_Occupancy_Modeling_Demo_files/figure-gfm/visualization-1.png)<!-- -->
+
+``` r
 # Make a similar plot for detection probability and weather, again conditioning 
 # on the means of parameters not represented in the plot
 weather_seq <- seq(min(weather), max(weather), length.out = 100)
@@ -426,12 +613,15 @@ ggplot(weather_plot_data, aes(x = weather, y = p_mean)) +
   geom_line() +
   labs(x = "Weather Condition", y = "Detection Probability") +
   theme_bw()
-
 ```
 
-Cool, occupancy and detection vary as expected with topographic complexity and weather conditions, respectively. Let's run another informative kind of check:
+![](Colleague-Facing_Occupancy_Modeling_Demo_files/figure-gfm/visualization-2.png)<!-- -->
 
-```{r visualization2}
+Cool, occupancy and detection vary as expected with topographic
+complexity and weather conditions, respectively. Let’s run another
+informative kind of check:
+
+``` r
 # Compare estimated vs true occupancy across sites
 site_comparison <- data.frame(
   Site = 1:n_sites,
@@ -451,14 +641,23 @@ ggplot(site_comparison, aes(x = True_Psi, y = Estimated_Psi)) +
   geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), alpha = 0.1, color="blue") +
   labs(x = "True Occupancy Probability", y = "Estimated Occupancy Probability") +
   theme_bw()
-
 ```
 
-Not bad. Looks like there's a bit of overestimation at the lower end of the range of occupancy probability, and a bit of underestimation at the upper end. In a formal project, we might interrogate this further and try some tweaks to address it, but for this high-level demo, we'll move on.
+![](Colleague-Facing_Occupancy_Modeling_Demo_files/figure-gfm/visualization2-1.png)<!-- -->
 
-Let's run a posterior predictive check, a common tool for Bayesian model diagnostics, in which we see whether the observed data are realistic for the data generating process we've inferred. We'll implement this in DHARMa, which uses a flexible quantile residual approach suitable for many types of models.
+Not bad. Looks like there’s a bit of overestimation at the lower end of
+the range of occupancy probability, and a bit of underestimation at the
+upper end. In a formal project, we might interrogate this further and
+try some tweaks to address it, but for this high-level demo, we’ll move
+on.
 
-```{r dharma_posterior_predictive, fig.width=10, fig.height=8}
+Let’s run a posterior predictive check, a common tool for Bayesian model
+diagnostics, in which we see whether the observed data are realistic for
+the data generating process we’ve inferred. We’ll implement this in
+DHARMa, which uses a flexible quantile residual approach suitable for
+many types of models.
+
+``` r
 # Load the DHARMa package for diagnostic plots
 library(DHARMa)
 
@@ -477,7 +676,11 @@ if(length(dim(y)) == 3) {
 
 # print dimensions; may help in debugging
 cat("Data dimensions:", n_species, "species,", n_sites, "sites,", n_visits, "visits\n")
+```
 
+    ## Data dimensions: 1 species, 100 sites, 5 visits
+
+``` r
 # thin posterior samples for computational efficiency
 n_sims <- dim(m1_jags$sims.list$z)[1]
 sim_indices <- sample(1:n_sims, min(100, n_sims))  # thin to 100
@@ -504,8 +707,17 @@ p_samples <- m1_jags$sims.list$p
 
 # check dimensions and structure of posterior samples
 cat("z_samples dimensions:", paste(dim(z_samples), collapse = " x "), "\n")
-cat("p_samples dimensions:", paste(dim(p_samples), collapse = " x "), "\n")
+```
 
+    ## z_samples dimensions: 3000 x 100
+
+``` r
+cat("p_samples dimensions:", paste(dim(p_samples), collapse = " x "), "\n")
+```
+
+    ## p_samples dimensions: 3000 x 100 x 5
+
+``` r
 # posterior predictive simulation
 for (s in 1:length(sim_indices)) {
   idx <- sim_indices[s]
@@ -572,13 +784,41 @@ dharma_obj <- createDHARMa(
 
 # Create DHARMa diagnostic plots
 plot(dharma_obj)
+```
 
+![](Colleague-Facing_Occupancy_Modeling_Demo_files/figure-gfm/dharma_posterior_predictive-1.png)<!-- -->
+
+``` r
 # test for overdispersion and zero-inflation
 # these are not really issues for binary data, but I'll take the opportunity to
 # show how smoothly DHARMa does this.
 testDispersion(dharma_obj)
-testZeroInflation(dharma_obj)
+```
 
+![](Colleague-Facing_Occupancy_Modeling_Demo_files/figure-gfm/dharma_posterior_predictive-2.png)<!-- -->
+
+    ## 
+    ##  DHARMa nonparametric dispersion test via sd of residuals fitted vs. simulated
+    ## 
+    ## data:  simulationOutput
+    ## dispersion = 0.96438, p-value = 0.64
+    ## alternative hypothesis: two.sided
+
+``` r
+testZeroInflation(dharma_obj)
+```
+
+![](Colleague-Facing_Occupancy_Modeling_Demo_files/figure-gfm/dharma_posterior_predictive-3.png)<!-- -->
+
+    ## 
+    ##  DHARMa zero-inflation test via comparison to expected zeros with simulation
+    ##  under H0 = fitted model
+    ## 
+    ## data:  simulationOutput
+    ## ratioObsSim = 0.98965, p-value = 0.72
+    ## alternative hypothesis: two.sided
+
+``` r
 # Create a DHARMa residual plot against predicted detection probability
 if(length(dim(y)) == 3) {
   # for multi-species model
@@ -616,12 +856,15 @@ plotResiduals(dharma_obj, flat_p_pred, xlab = "Predicted Detection Probability",
               main = "DHARMa Residuals vs. Predicted Detection")
 ```
 
-Looks like a bit of a trend in residuals versus predictions. Again, for a formal project, we'd keep tweaking, but for now let's move on.
+![](Colleague-Facing_Occupancy_Modeling_Demo_files/figure-gfm/dharma_posterior_predictive-4.png)<!-- -->
 
-Next we'll look at a visual summary of the known true parameter values and our model's estimates, as we did for the simpler model:
+Looks like a bit of a trend in residuals versus predictions. Again, for
+a formal project, we’d keep tweaking, but for now let’s move on.
 
+Next we’ll look at a visual summary of the known true parameter values
+and our model’s estimates, as we did for the simpler model:
 
-```{r full_model_visual_comparison, fig.width=10, fig.height=6}
+``` r
 # Set up dataframe for full model parameter comparisons
 full_param_comparison <- data.frame(
   parameter = c("Occupancy Intercept (β0)", 
@@ -691,13 +934,16 @@ ggplot(full_param_comparison, aes(x = parameter, y = estimated, color = group)) 
   coord_flip()
 ```
 
+![](Colleague-Facing_Occupancy_Modeling_Demo_files/figure-gfm/full_model_visual_comparison-1.png)<!-- -->
+
 Pretty good!
 
 # Predicting Occupancy Across the Landscape
 
-Finally, let's show how we could use our model to map predicted occupancy across a hypothetical spatial landscape:
+Finally, let’s show how we could use our model to map predicted
+occupancy across a hypothetical spatial landscape:
 
-```{r predict_landscape}
+``` r
 # Create a grid representing a landscape with varying topographic complexity.
 # We'll use a simple function to induce some spatial autocorrelation.
 grid_size <- 20
@@ -741,14 +987,21 @@ p2 <- ggplot(landscape, aes(x = x, y = y, fill = uncertainty)) +
 gridExtra::grid.arrange(p1, p2, ncol = 2)
 ```
 
-The maps show variation in predicted occupancy probabilities on the left, and uncertainty around these predictions on the right. This might help managers plan conservation strategies.
+![](Colleague-Facing_Occupancy_Modeling_Demo_files/figure-gfm/predict_landscape-1.png)<!-- -->
+
+The maps show variation in predicted occupancy probabilities on the
+left, and uncertainty around these predictions on the right. This might
+help managers plan conservation strategies.
 
 # Extensions
 
 The model above could be extended in several ways, including:
 
-1. **Multi-species occupancy models** to borrow information among species and account for species interactions
-2. **Dynamic occupancy models** to track colonization and extinction over time
-3. **Spatiotemporal occupancy models** to account for spatiotemporal autocorrelation
+1.  **Multi-species occupancy models** to borrow information among
+    species and account for species interactions
+2.  **Dynamic occupancy models** to track colonization and extinction
+    over time
+3.  **Spatiotemporal occupancy models** to account for spatiotemporal
+    autocorrelation
 
 These approaches will be explored in future demos.

@@ -2,7 +2,9 @@
 title: "Bayesian Mark-Recapture with Data Augmentation in JAGS"
 author: "Kyle Rosenblad"
 date: "3 April 2025"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
