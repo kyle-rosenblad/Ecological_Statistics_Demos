@@ -11,6 +11,7 @@ output:
     theme: flatly
     highlight: tango
     code_folding: hide
+always_allow_html: true
 ---
 
 ```{r setup, include=FALSE}
